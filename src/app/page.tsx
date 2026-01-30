@@ -63,7 +63,15 @@ export default function Home() {
     try {
       setIsLoading(true);
       const response = await fetch('/api/tasks');
+      
+      if (!response.ok) {
+        console.error('加载任务失败:', response.status);
+        return;
+      }
+      
       const data = await response.json();
+      console.log('加载到的任务:', data);
+      
       if (data.tasks) {
         setTasks(data.tasks.map((task: any) => ({
           ...task,
@@ -109,6 +117,8 @@ export default function Home() {
     setIsProcessing(true);
     
     try {
+      console.log('开始添加作业:', taskInput, dueDate);
+      
       // 调用后端API自动分点并保存到数据库
       const response = await fetch('/api/tasks', {
         method: 'POST',
@@ -119,12 +129,26 @@ export default function Home() {
         }),
       });
       
+      console.log('API响应状态:', response.status);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API错误:', errorData);
+        alert(errorData.error || '添加作业失败，请重试');
+        setIsProcessing(false);
+        return;
+      }
+      
       const data = await response.json();
+      console.log('API返回数据:', data);
+      
       if (data.tasks) {
-        setTasks(prev => [...prev, ...data.tasks.map((task: any) => ({
+        const newTasks = data.tasks.map((task: any) => ({
           ...task,
           dueDate: task.dueDate ? new Date(task.dueDate) : undefined
-        }))]);
+        }));
+        console.log('新任务列表:', newTasks);
+        setTasks(prev => [...prev, ...newTasks]);
       }
       setTaskInput('');
       setDueDate('');
