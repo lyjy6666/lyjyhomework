@@ -70,8 +70,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ tasks: formattedTasks });
   } catch (error) {
     console.error('Error processing tasks:', error);
+
+    // 获取更详细的错误信息
+    let errorMessage = '处理作业时出错，请重试';
+
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+
+    console.error('Full error:', error);
+
     return NextResponse.json(
-      { error: '处理作业时出错，请重试' },
+      {
+        error: errorMessage,
+        details: error instanceof Error ? error.stack : String(error)
+      },
       { status: 500 }
     );
   }
@@ -135,9 +155,15 @@ async function callDoubaoAPI(text: string): Promise<string[]> {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('豆包 API 错误:', errorData);
-      throw new Error(`豆包 API 调用失败: ${response.status}`);
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      console.error('豆包 API 错误:', {
+        status: response.status,
+        statusText: response.statusText,
+        data: errorData
+      });
+      // 如果 AI API 失败，返回原始文本作为任务
+      console.warn('豆包 API 失败，使用原始文本作为任务');
+      return [text.trim()];
     }
 
     const data = await response.json();
@@ -160,6 +186,8 @@ async function callDoubaoAPI(text: string): Promise<string[]> {
     return taskItems;
   } catch (error) {
     console.error('调用豆包 API 失败:', error);
-    throw error;
+    // 如果发生任何错误，返回原始文本作为任务
+    console.warn('豆包 API 调用异常，使用原始文本作为任务');
+    return [text.trim()];
   }
 }
