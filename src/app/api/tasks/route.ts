@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { LLMClient, Config } from 'coze-coding-dev-sdk';
-import { taskManager } from '@/storage/database/taskManager';
+import { taskManager } from '@/lib/taskManager';
 
 // GET - 获取所有任务
 export async function GET() {
   try {
     const tasks = await taskManager.getAllTasks();
-    return NextResponse.json({ tasks });
+    // 转换字段名以匹配前端期望的格式
+    const formattedTasks = tasks.map(task => ({
+      id: task.id,
+      text: task.text,
+      completed: task.completed,
+      dueDate: task.due_date ? new Date(task.due_date) : undefined,
+      isPinned: task.is_pinned,
+      createdAt: new Date(task.created_at),
+      updatedAt: task.updated_at ? new Date(task.updated_at) : undefined
+    }));
+    return NextResponse.json({ tasks: formattedTasks });
   } catch (error) {
     console.error('Error fetching tasks:', error);
     return NextResponse.json(
@@ -28,15 +37,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 初始化 LLM 客户端
-    const config = new Config();
-    const client = new LLMClient(config);
+    console.log('开始处理任务:', text);
 
-    // 构建消息
-    const messages = [
-      {
-        role: 'system' as const,
-        content: `你是一个专业的作业管理助手。用户会输入一段作业内容，你需要将其整理成清晰的作业列表。
+    // 调用豆包 API 进行 AI 分点
+    const taskItems = await callDoubaoAPI(text);
+
+    console.log('AI 分点结果:', taskItems);
+
+    // 批量创建任务到数据库
+    const createdTasks = await Promise.all(
+      taskItems.map(item =>
+        taskManager.createTask({
+          text: item,
+          completed: false,
+          due_date: dueDate ? new Date(dueDate).toISOString() : null,
+          is_pinned: false
+        })
+      )
+    );
+
+    // 转换字段名以匹配前端期望的格式
+    const formattedTasks = createdTasks.map(task => ({
+      id: task.id,
+      text: task.text,
+      completed: task.completed,
+      dueDate: task.due_date ? new Date(task.due_date) : undefined,
+      isPinned: task.is_pinned,
+      createdAt: new Date(task.created_at),
+      updatedAt: task.updated_at ? new Date(task.updated_at) : undefined
+    }));
+
+    return NextResponse.json({ tasks: formattedTasks });
+  } catch (error) {
+    console.error('Error processing tasks:', error);
+    return NextResponse.json(
+      { error: '处理作业时出错，请重试' },
+      { status: 500 }
+    );
+  }
+}
+
+// 调用豆包 API
+async function callDoubaoAPI(text: string): Promise<string[]> {
+  const apiKey = process.env.DOUBAO_API_KEY;
+
+  if (!apiKey) {
+    console.error('Missing DOUBAO_API_KEY environment variable');
+    throw new Error('豆包 API Key 未配置');
+  }
+
+  const url = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+
+  const messages = [
+    {
+      role: 'system' as const,
+      content: `你是一个专业的作业管理助手。用户会输入一段作业内容，你需要将其整理成清晰的作业列表。
 
 **重要规则：**
 1. 如果用户输入的某个科目有多个作业（例如"语文作业一张试卷三个练习册"），需要将这些作业分别列为独立的不同作业项
@@ -56,54 +111,55 @@ export async function POST(request: NextRequest) {
 英语单词抄写三遍
 英语阅读理解两篇
 英语作文一篇`
-      },
-      {
-        role: 'user' as const,
-        content: `请帮我将以下作业内容整理成列表：\n${text}`
-      }
-    ];
+    },
+    {
+      role: 'user' as const,
+      content: `请帮我将以下作业内容整理成列表：\n${text}`
+    }
+  ];
 
-    // 调用 LLM
-    const response = await client.invoke(messages, {
-      temperature: 0.3
+  try {
+    console.log('调用豆包 API...');
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'doubao-pro-256k-250522',
+        messages: messages,
+        temperature: 0.3
+      })
     });
 
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('豆包 API 错误:', errorData);
+      throw new Error(`豆包 API 调用失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('豆包 API 响应:', data);
+
+    const content = data.choices?.[0]?.message?.content || '';
+
     // 处理返回的内容，分割成任务列表
-    const tasksText = response.content.trim();
+    const tasksText = content.trim();
     const taskItems = tasksText
       .split('\n')
-      .map(line => line.replace(/^[0-9]+[.、]\s*/, '').trim())
-      .filter(line => line.length > 0);
+      .map((line: string) => line.replace(/^[0-9]+[.、]\s*/, '').trim())
+      .filter((line: string) => line.length > 0);
 
     if (taskItems.length === 0) {
       // 如果没有分割成功，将整个文本作为一个任务
-      const task = await taskManager.createTask({
-        text: text.trim(),
-        dueDate: dueDate ? new Date(dueDate) : null,
-        completed: false,
-        isPinned: false
-      });
-      return NextResponse.json({ tasks: [task] });
+      return [text.trim()];
     }
 
-    // 批量创建任务到数据库
-    const createdTasks = await Promise.all(
-      taskItems.map(item =>
-        taskManager.createTask({
-          text: item,
-          dueDate: dueDate ? new Date(dueDate) : null,
-          completed: false,
-          isPinned: false
-        })
-      )
-    );
-
-    return NextResponse.json({ tasks: createdTasks });
+    return taskItems;
   } catch (error) {
-    console.error('Error processing tasks:', error);
-    return NextResponse.json(
-      { error: '处理作业时出错，请重试' },
-      { status: 500 }
-    );
+    console.error('调用豆包 API 失败:', error);
+    throw error;
   }
 }

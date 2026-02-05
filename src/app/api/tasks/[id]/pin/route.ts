@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { taskManager } from '@/storage/database/taskManager';
+import { taskManager } from '@/lib/taskManager';
 
 export async function POST(
   request: Request,
@@ -24,7 +24,18 @@ export async function POST(
       );
     }
 
-    return NextResponse.json({ task });
+    // 转换字段名以匹配前端期望的格式
+    const formattedTask = {
+      id: task.id,
+      text: task.text,
+      completed: task.completed,
+      dueDate: task.due_date ? new Date(task.due_date) : undefined,
+      isPinned: task.is_pinned,
+      createdAt: new Date(task.created_at),
+      updatedAt: task.updated_at ? new Date(task.updated_at) : undefined
+    };
+
+    return NextResponse.json({ task: formattedTask });
   } catch (error) {
     console.error('Error pinning task:', error);
     return NextResponse.json(

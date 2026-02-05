@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { taskManager } from '@/storage/database/taskManager';
+import { taskManager } from '@/lib/taskManager';
 
 export async function PUT(
   request: NextRequest,
@@ -16,7 +16,15 @@ export async function PUT(
     }
 
     const data = await request.json();
-    const task = await taskManager.updateTask(id, data);
+
+    // 转换字段名
+    const updateData: any = {};
+    if (data.text !== undefined) updateData.text = data.text;
+    if (data.completed !== undefined) updateData.completed = data.completed;
+    if (data.dueDate !== undefined) updateData.due_date = data.dueDate ? new Date(data.dueDate).toISOString() : null;
+    if (data.isPinned !== undefined) updateData.is_pinned = data.isPinned;
+
+    const task = await taskManager.updateTask(id, updateData);
 
     if (!task) {
       return NextResponse.json(
@@ -25,7 +33,18 @@ export async function PUT(
       );
     }
 
-    return NextResponse.json({ task });
+    // 转换字段名以匹配前端期望的格式
+    const formattedTask = {
+      id: task.id,
+      text: task.text,
+      completed: task.completed,
+      dueDate: task.due_date ? new Date(task.due_date) : undefined,
+      isPinned: task.is_pinned,
+      createdAt: new Date(task.created_at),
+      updatedAt: task.updated_at ? new Date(task.updated_at) : undefined
+    };
+
+    return NextResponse.json({ task: formattedTask });
   } catch (error) {
     console.error('Error updating task:', error);
     return NextResponse.json(
