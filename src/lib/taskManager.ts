@@ -10,12 +10,21 @@ export interface Task {
   updated_at?: string | null
 }
 
+// 确保 supabase 已配置
+const getSupabaseClient = () => {
+  if (!supabase) {
+    throw new Error('Supabase client not initialized. Please check environment variables.')
+  }
+  return supabase
+}
+
 export class TaskManager {
   async createTask(data: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task> {
     try {
       console.log('Creating task with data:', data)
 
-      const { data: task, error } = await supabase
+      const client = getSupabaseClient()
+      const { data: task, error } = await client
         .from('tasks')
         .insert({
           text: data.text,
@@ -42,7 +51,8 @@ export class TaskManager {
 
   async getAllTasks(): Promise<Task[]> {
     try {
-      const { data: tasks, error } = await supabase
+      const client = getSupabaseClient()
+      const { data: tasks, error } = await client
         .from('tasks')
         .select('*')
         .order('is_pinned', { ascending: false })
@@ -63,7 +73,8 @@ export class TaskManager {
 
   async getTaskById(id: number): Promise<Task | null> {
     try {
-      const { data: task, error } = await supabase
+      const client = getSupabaseClient()
+      const { data: task, error } = await client
         .from('tasks')
         .select('*')
         .eq('id', id)
@@ -83,7 +94,8 @@ export class TaskManager {
 
   async updateTask(id: number, data: Partial<Omit<Task, 'id' | 'created_at'>>): Promise<Task | null> {
     try {
-      const { data: task, error } = await supabase
+      const client = getSupabaseClient()
+      const { data: task, error } = await client
         .from('tasks')
         .update({
           ...data,
@@ -107,7 +119,8 @@ export class TaskManager {
 
   async deleteTask(id: number): Promise<boolean> {
     try {
-      const { error } = await supabase
+      const client = getSupabaseClient()
+      const { error } = await client
         .from('tasks')
         .delete()
         .eq('id', id)
